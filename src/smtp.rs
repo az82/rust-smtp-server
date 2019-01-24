@@ -32,11 +32,6 @@ enum State {
 }
 
 
-pub struct Response {
-    code: u16,
-    message: String
-}
-
 pub struct Message {
     sender: String,
     recipients: Vec<String>,
@@ -96,44 +91,44 @@ impl Parser {
         self.get_if_done(|| {self.sender_domain.as_str()})
     }
 
-    pub fn feed_line(&mut self, line: &str) -> Result<(), String> {
+    pub fn feed_line<'a>(&mut self, line: &'a str) -> Result<&'a str, &'a str> {
         match self.state {
             State::Helo => {
                 if line.starts_with(HELO_START) {
                     self.sender_domain = line[HELO_START.len()..].trim().to_string();
                     self.state = State::Mail;
-                    Ok(())
+                    result_ok()
                 } else {
-                    Err(format!("Unexpected line: {}", line).to_string())
+                    result_syntax_error()
                 }
             },
             State::Mail => {
                 if line.starts_with(MAIL_START) {
                     self.next_sender = line[MAIL_START.len()..].trim().to_string();
                     self.state = State::Rcpt;
-                    Ok(())
+                    result_ok()
                 } else {
-                    Err(format!("Unexpected line: {}", line).to_string())
+                    result_syntax_error()
                 }
             },
             State::Rcpt => {
                 if line.starts_with(RCPT_START) {
                     self.next_recipients.push(line[RCPT_START.len()..].trim().to_string());
                     self.state = State::RcptOrData;
-                    Ok(())
+                    result_ok()
                 } else {
-                    Err(format!("Unexpected line: {}", line).to_string())
+                    result_syntax_error()
                 }
             },
             State::RcptOrData => {
                 if line.starts_with(RCPT_START) {
                     self.next_recipients.push(line[RCPT_START.len()..].trim().to_string());
-                    Ok(())
+                    result_ok()
                 } else if line == DATA_LINE {
                     self.state = State::Dot;
-                    Ok(())
+                    result_send_message_content()
                 } else {
-                    Err(format!("Unexpected line: {}", line).to_string())
+                    result_syntax_error()
                 }
             },
             State::Dot => {
@@ -144,29 +139,54 @@ impl Parser {
                         data: self.next_data.clone()
                     });
                     self.state = State::MailOrQuit;
-                    Ok(())
+                    result_ok()
                 } else {
                     self.next_data.push(line.to_string());
-                    Ok(())
+                    result_empty()
                 }
             },
             State::MailOrQuit => {
                 if line.starts_with(MAIL_START) {
                     self.next_sender = line[MAIL_START.len()..].trim().to_string();
                     self.state = State::Rcpt;
-                    Ok(())
+                    result_ok()
                 } else if line == QUIT_LINE {
                     self.state = State::Done;
-                    Ok(())
+                    result_bye()
                 } else {
-                    Err(format!("Unexpected line: {}", line).to_string())
+                    result_syntax_error()
                 }
             },
             State::Done => {
-                Err(format!("Unexpected line: {}", line).to_string())
+                result_syntax_error()
             }
         }
     }
+
+}
+
+fn result_ok() -> Result<&'static str, &'static str> {
+    Ok("250 OK")
+}
+
+fn result_empty() -> Result<&'static str, &'static str> {
+    Ok("")
+}
+
+fn result_send_message_content() -> Result<&'static str, &'static str> {
+    Ok("354 Send message content")
+}
+
+fn result_ready() -> Result<&'static str, &'static str> {
+    Ok("220 ready")
+}
+
+fn result_bye() -> Result<&'static str, &'static str> {
+    Ok("221 Bye")
+}
+
+fn result_syntax_error() -> Result<&'static str, &'static str> {
+    Err("500 unexpected line")
 }
 
 
