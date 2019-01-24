@@ -5,6 +5,22 @@ const RCPT_START: &str = "RCPT TO:";
 const DATA_LINE: &str = "DATA";
 const QUIT_LINE: &str = "QUIT";
 
+
+//S: 220 smtp.server.com Simple Mail Transfer Service Ready
+//C: HELO client.example.com
+//S: 250 Hello client.example.com
+//C: MAIL FROM:<mail@samlogic.com>
+//S: 250 OK
+//C: RCPT TO:<john@mail.com>
+//S: 250 OK
+//C: DATA
+//S: 354 Send message content; end with <CRLF>.<CRLF>
+//C: <The message data (body text, subject, e-mail header, attachments etc) is sent>
+//C: .
+//S: 250 OK, message accepted for delivery: queued as 12345
+//C: QUIT
+//S: 221 Bye
+
 enum State {
     Helo,
     Mail,
@@ -16,6 +32,11 @@ enum State {
 }
 
 
+pub struct Response {
+    code: u16,
+    message: String
+}
+
 pub struct Message {
     sender: String,
     recipients: Vec<String>,
@@ -23,7 +44,7 @@ pub struct Message {
 }
 
 
-struct Parser {
+pub struct Parser {
     state: State,
     sender_domain: String,
     messages: Vec<Message>,
@@ -33,13 +54,18 @@ struct Parser {
 }
 
 impl Message {
-    fn new() -> Message {
-        Message {
-            sender: "".to_string(),
-            recipients: Vec::new(),
-            data: Vec::new()
-        }
+    pub fn get_sender(&self) -> &str {
+        &self.sender
     }
+
+    pub fn get_recipients(&self) -> &Vec<String> {
+        &self.recipients
+    }
+
+    pub fn get_data(&self) -> String {
+        self.data.join("\n")
+    }
+
 }
 
 
@@ -55,11 +81,19 @@ impl Parser {
         }
     }
 
-    pub fn get_messages(&self) -> Option<&Vec<Message>> {
+    fn get_if_done<R, F: FnOnce() -> R>(&self, getter: F) -> Option<R> {
         match self.state {
-            State::Done => Some(&self.messages),
+            State::Done => Some(getter()),
             _ => None
         }
+    }
+
+    pub fn get_messages(&self) -> Option<&Vec<Message>> {
+        self.get_if_done(|| {&self.messages})
+    }
+
+    pub fn get_sender_domain(&self) -> Option<&str> {
+        self.get_if_done(|| {self.sender_domain.as_str()})
     }
 
     pub fn feed_line(&mut self, line: &str) -> Result<(), String> {
@@ -112,7 +146,7 @@ impl Parser {
                     self.state = State::MailOrQuit;
                     Ok(())
                 } else {
-                    self.next_data.push(line[RCPT_START.len()..].to_string());
+                    self.next_data.push(line.to_string());
                     Ok(())
                 }
             },
@@ -132,5 +166,38 @@ impl Parser {
                 Err(format!("Unexpected line: {}", line).to_string())
             }
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_message() {
+        // When
+        let mut parser = Parser::new();
+
+        // TODO: Read from file
+        parser.feed_line("HELO localhost");
+        parser.feed_line("MAIL FROM: tester@localhost");
+        parser.feed_line("RCPT TO: admin@localhost");
+        parser.feed_line("DATA");
+        parser.feed_line("It works!");
+        parser.feed_line(".");
+        parser.feed_line("QUIT");
+
+        // Then
+        assert_eq!(parser.get_sender_domain(), Some("localhost"));
+
+        let messages = parser.get_messages().unwrap();
+        assert_eq!(messages.len(), 1);
+
+        let message = messages.first().unwrap();
+
+        assert_eq!(message.get_sender(), "tester@localhost");
+        assert_eq!(message.get_recipients().join(", "), "admin@localhost");
+        assert_eq!(message.get_data(), "It works!");
     }
 }
