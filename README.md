@@ -38,4 +38,4 @@ EOT
 
 ## Status
 
-[![Build Status](https://travis-ci.org/az82/rust-levenshtein.svg?branch=master)](https://travis-ci.org/az82/rust-levenshtein)
+[![Build Status](https://travis-ci.com/az82/rust-smtp-server.svg?token=RBqG5onRy5GYr4SPjeDq&branch=master)](https://travis-ci.com/az82/rust-smtp-server)
