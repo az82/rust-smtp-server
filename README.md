@@ -2,7 +2,7 @@
 
 This is a small educational project for teaching Rust.
 It implements a simple, not entirely standards-compliant and very unsafe SMTP server in Rust.
-The server prints received messages on stdout. 
+The server prints received messages on stdout.
 
 This project is licensed under the terms of the [MIT license](LICENSE).
 
@@ -15,11 +15,13 @@ cargo build
 ## Usage
 
 Starting the server:
+
 ```bash
 ./target/debug/rust-smtp-server
 ```
 
 Sending requests using netcat:
+
 ```bash
 nc localhost 2525 <<EOT
 HELO localhost
@@ -35,7 +37,6 @@ EOT
 EOT
 ```
 
-
 ## Status
 
-[![Build Status](https://travis-ci.com/az82/rust-smtp-server.svg?token=RBqG5onRy5GYr4SPjeDq&branch=master)](https://travis-ci.com/az82/rust-smtp-server)
+[![CircleCI](https://circleci.com/gh/az82/rust-smtp-server.svg?style=svg&circle-token=e44f845dc05807a8693d2b3674bb023eb94c3996)](https://circleci.com/gh/az82/rust-smtp-server)
