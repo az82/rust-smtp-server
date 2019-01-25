@@ -1,0 +1,25 @@
+version: 2
+
+jobs:
+  test:
+    docker:
+      - image: rust:1.32.0
+    steps:
+      - checkout
+      - run:
+          name: Calculate dependencies
+          command: cargo generate-lockfile
+      - restore_cache:
+          keys:
+            - cache-{{ arch }}-{{ checksum "Cargo.lock" }}
+      - run:
+          name: Build
+          command: cargo build
+      - save_cache:
+          paths:
+            - /usr/local/cargo/registry
+            - target
+          key: cache-{{ arch }}-{{ checksum "Cargo.lock" }}
+      - run:
+          name: Run tests
+          command: cargo test 
