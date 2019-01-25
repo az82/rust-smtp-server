@@ -5,10 +5,8 @@ use threadpool::ThreadPool;
 
 mod smtp;
 
-
 const BIND_ADDRESS: &str = "127.0.0.1";
 const BIND_PORT: u16 = 2525;
-
 
 fn handle_connection(stream: TcpStream) {
     let result = smtp::handle_connection(stream).unwrap();
@@ -20,7 +18,6 @@ fn handle_connection(stream: TcpStream) {
         println!("{}", message.get_data());
     }
 }
-
 
 fn main() {
     let listener = TcpListener::bind(format!("{}:{}", BIND_ADDRESS, BIND_PORT)).unwrap();

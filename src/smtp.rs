@@ -2,7 +2,6 @@ use std::io::prelude::*;
 use std::io::{BufReader, Error};
 use std::net::TcpStream;
 
-
 const HELO_START: &str = "HELO ";
 const MAIL_START: &str = "MAIL FROM:";
 const RCPT_START: &str = "RCPT TO:";
@@ -14,7 +13,6 @@ const MSG_OK: &str = "250 OK";
 const MSG_SEND_MESSAGE_CONTENT: &str = "354 Send message content";
 const MSG_BYE: &str = "221 Bye";
 const MSG_SYNTAX_ERROR: &str = "500 unexpected line";
-
 
 //S: 220 smtp.server.com Simple Mail Transfer Service Ready
 //C: HELO client.example.com
@@ -38,16 +36,14 @@ enum State {
     RcptOrData,
     Dot,
     MailOrQuit,
-    Done
+    Done,
 }
-
 
 pub struct Message {
     sender: String,
     recipients: Vec<String>,
-    data: Vec<String>
+    data: Vec<String>,
 }
-
 
 pub struct ConnectionResult {
     state: State,
@@ -55,9 +51,8 @@ pub struct ConnectionResult {
     messages: Vec<Message>,
     next_sender: String,
     next_recipients: Vec<String>,
-    next_data: Vec<String>
+    next_data: Vec<String>,
 }
-
 
 impl Message {
     pub fn get_sender(&self) -> &str {
@@ -71,9 +66,7 @@ impl Message {
     pub fn get_data(&self) -> String {
         self.data.join("\n")
     }
-
 }
-
 
 impl ConnectionResult {
     pub fn new() -> ConnectionResult {
@@ -90,16 +83,16 @@ impl ConnectionResult {
     fn get_if_done<R, F: FnOnce() -> R>(&self, getter: F) -> Option<R> {
         match self.state {
             State::Done => Some(getter()),
-            _ => None
+            _ => None,
         }
     }
 
     pub fn get_messages(&self) -> Option<&Vec<Message>> {
-        self.get_if_done(|| {&self.messages})
+        self.get_if_done(|| &self.messages)
     }
 
     pub fn get_sender_domain(&self) -> Option<&str> {
-        self.get_if_done(|| {self.sender_domain.as_str()})
+        self.get_if_done(|| self.sender_domain.as_str())
     }
 
     pub fn feed_line<'a>(&mut self, line: &'a str) -> Result<&'a str, &'a str> {
@@ -112,7 +105,7 @@ impl ConnectionResult {
                 } else {
                     Err(MSG_SYNTAX_ERROR)
                 }
-            },
+            }
             State::Mail => {
                 if line.starts_with(MAIL_START) {
                     self.next_sender = line[MAIL_START.len()..].trim().to_string();
@@ -121,19 +114,21 @@ impl ConnectionResult {
                 } else {
                     Err(MSG_SYNTAX_ERROR)
                 }
-            },
+            }
             State::Rcpt => {
                 if line.starts_with(RCPT_START) {
-                    self.next_recipients.push(line[RCPT_START.len()..].trim().to_string());
+                    self.next_recipients
+                        .push(line[RCPT_START.len()..].trim().to_string());
                     self.state = State::RcptOrData;
                     Ok(MSG_OK)
                 } else {
                     Err(MSG_SYNTAX_ERROR)
                 }
-            },
+            }
             State::RcptOrData => {
                 if line.starts_with(RCPT_START) {
-                    self.next_recipients.push(line[RCPT_START.len()..].trim().to_string());
+                    self.next_recipients
+                        .push(line[RCPT_START.len()..].trim().to_string());
                     Ok(MSG_OK)
                 } else if line == DATA_LINE {
                     self.state = State::Dot;
@@ -141,13 +136,13 @@ impl ConnectionResult {
                 } else {
                     Err(MSG_SYNTAX_ERROR)
                 }
-            },
+            }
             State::Dot => {
                 if line == "." {
                     self.messages.push(Message {
                         sender: self.next_sender.clone(),
                         recipients: self.next_recipients.clone(),
-                        data: self.next_data.clone()
+                        data: self.next_data.clone(),
                     });
                     self.next_sender = "".to_string();
                     self.next_recipients = Vec::new();
@@ -158,7 +153,7 @@ impl ConnectionResult {
                     self.next_data.push(line.to_string());
                     Ok("")
                 }
-            },
+            }
             State::MailOrQuit => {
                 if line.starts_with(MAIL_START) {
                     self.next_sender = line[MAIL_START.len()..].trim().to_string();
@@ -170,14 +165,11 @@ impl ConnectionResult {
                 } else {
                     Err(MSG_SYNTAX_ERROR)
                 }
-            },
-            State::Done => {
-                Err(MSG_SYNTAX_ERROR)
             }
+            State::Done => Err(MSG_SYNTAX_ERROR),
         }
     }
 }
-
 
 pub fn handle_connection(mut stream: TcpStream) -> Result<ConnectionResult, Error> {
     let mut result = ConnectionResult::new();
@@ -190,12 +182,14 @@ pub fn handle_connection(mut stream: TcpStream) -> Result<ConnectionResult, Erro
         let mut line = String::new();
         reader.read_line(&mut line)?;
         // read_line will leave trailing newlines which must be removed
-        match result.feed_line(line.trim_right_matches(|c: char|{ c== '\n' || c == '\r'})) {
+        match result.feed_line(line.trim_right_matches(|c: char| c == '\n' || c == '\r')) {
             Ok("") => {}
-            Ok("221 Bye") => { break; }
+            Ok("221 Bye") => {
+                break;
+            }
             Ok(s) => {
                 writeln!(stream, "{}", s)?;
-            },
+            }
             Err(e) => {
                 writeln!(stream, "{}", e)?;
             }
@@ -204,7 +198,6 @@ pub fn handle_connection(mut stream: TcpStream) -> Result<ConnectionResult, Erro
 
     Ok(result)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -215,13 +208,21 @@ mod tests {
         // When
         let mut result = ConnectionResult::new();
 
-        result.feed_line("HELO localhost").unwrap();
-        result.feed_line("MAIL FROM: tester@localhost").unwrap();
-        result.feed_line("RCPT TO: admin@localhost").unwrap();
-        result.feed_line("DATA").unwrap();
-        result.feed_line("It works!").unwrap();
-        result.feed_line(".").unwrap();
-        result.feed_line("QUIT").unwrap();
+        let request = "HELO localhost\n\
+                       MAIL FROM: tester@localhost\n\
+                       RCPT TO: admin@localhost\n\
+                       DATA\n\
+                       It works!\n\
+                       .\n\
+                       QUIT\n";
+        let mut response = String::new();
+
+        for line in request.lines() {
+            match result.feed_line(&line) {
+                Ok(s) => response.push_str(s),
+                Err(s) => response.push_str(s),
+            }
+        }
 
         // Then
         assert_eq!(result.get_sender_domain(), Some("localhost"));
@@ -234,5 +235,24 @@ mod tests {
         assert_eq!(message.get_sender(), "tester@localhost");
         assert_eq!(message.get_recipients().join(", "), "admin@localhost");
         assert_eq!(message.get_data(), "It works!");
+
+        assert_eq!(
+            response,
+            "250 OK\
+             250 OK\
+             250 OK\
+             354 Send message content\
+             250 OK\
+             221 Bye"
+        )
+    }
+
+    #[test]
+    fn no_helo() {
+        // Given
+        let mut result = ConnectionResult::new();
+
+        // Expect
+        assert_eq!(result.feed_line("Invalid SMTP"), Err(MSG_SYNTAX_ERROR));
     }
 }
