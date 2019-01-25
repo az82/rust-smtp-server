@@ -1,9 +1,19 @@
+use std::io::prelude::*;
+use std::io::{BufReader, Error};
+use std::net::TcpStream;
+
 
 const HELO_START: &str = "HELO ";
 const MAIL_START: &str = "MAIL FROM:";
 const RCPT_START: &str = "RCPT TO:";
 const DATA_LINE: &str = "DATA";
 const QUIT_LINE: &str = "QUIT";
+
+const MSG_READY: &str = "220 ready";
+const MSG_OK: &str = "250 OK";
+const MSG_SEND_MESSAGE_CONTENT: &str = "354 Send message content";
+const MSG_BYE: &str = "221 Bye";
+const MSG_SYNTAX_ERROR: &str = "500 unexpected line";
 
 
 //S: 220 smtp.server.com Simple Mail Transfer Service Ready
@@ -39,7 +49,7 @@ pub struct Message {
 }
 
 
-pub struct Parser {
+pub struct ConnectionResult {
     state: State,
     sender_domain: String,
     messages: Vec<Message>,
@@ -47,6 +57,7 @@ pub struct Parser {
     next_recipients: Vec<String>,
     next_data: Vec<String>
 }
+
 
 impl Message {
     pub fn get_sender(&self) -> &str {
@@ -64,9 +75,9 @@ impl Message {
 }
 
 
-impl Parser {
-    pub fn new() -> Parser {
-        Parser {
+impl ConnectionResult {
+    pub fn new() -> ConnectionResult {
+        ConnectionResult {
             state: State::Helo,
             sender_domain: "".to_string(),
             messages: Vec::new(),
@@ -97,38 +108,38 @@ impl Parser {
                 if line.starts_with(HELO_START) {
                     self.sender_domain = line[HELO_START.len()..].trim().to_string();
                     self.state = State::Mail;
-                    result_ok()
+                    Ok(MSG_OK)
                 } else {
-                    result_syntax_error()
+                    Err(MSG_SYNTAX_ERROR)
                 }
             },
             State::Mail => {
                 if line.starts_with(MAIL_START) {
                     self.next_sender = line[MAIL_START.len()..].trim().to_string();
                     self.state = State::Rcpt;
-                    result_ok()
+                    Ok(MSG_OK)
                 } else {
-                    result_syntax_error()
+                    Err(MSG_SYNTAX_ERROR)
                 }
             },
             State::Rcpt => {
                 if line.starts_with(RCPT_START) {
                     self.next_recipients.push(line[RCPT_START.len()..].trim().to_string());
                     self.state = State::RcptOrData;
-                    result_ok()
+                    Ok(MSG_OK)
                 } else {
-                    result_syntax_error()
+                    Err(MSG_SYNTAX_ERROR)
                 }
             },
             State::RcptOrData => {
                 if line.starts_with(RCPT_START) {
                     self.next_recipients.push(line[RCPT_START.len()..].trim().to_string());
-                    result_ok()
+                    Ok(MSG_OK)
                 } else if line == DATA_LINE {
                     self.state = State::Dot;
-                    result_send_message_content()
+                    Ok(MSG_SEND_MESSAGE_CONTENT)
                 } else {
-                    result_syntax_error()
+                    Err(MSG_SYNTAX_ERROR)
                 }
             },
             State::Dot => {
@@ -139,54 +150,56 @@ impl Parser {
                         data: self.next_data.clone()
                     });
                     self.state = State::MailOrQuit;
-                    result_ok()
+                    Ok(MSG_OK)
                 } else {
                     self.next_data.push(line.to_string());
-                    result_empty()
+                    Ok("")
                 }
             },
             State::MailOrQuit => {
                 if line.starts_with(MAIL_START) {
                     self.next_sender = line[MAIL_START.len()..].trim().to_string();
                     self.state = State::Rcpt;
-                    result_ok()
+                    Ok(MSG_OK)
                 } else if line == QUIT_LINE {
                     self.state = State::Done;
-                    result_bye()
+                    Ok(MSG_BYE)
                 } else {
-                    result_syntax_error()
+                    Err(MSG_SYNTAX_ERROR)
                 }
             },
             State::Done => {
-                result_syntax_error()
+                Err(MSG_SYNTAX_ERROR)
+            }
+        }
+    }
+}
+
+
+pub fn handle_connection(mut stream: TcpStream) -> Result<ConnectionResult, Error> {
+    let mut result = ConnectionResult::new();
+
+    writeln!(stream, "{}", MSG_READY)?;
+
+    let mut reader = BufReader::new(stream.try_clone()?);
+
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+        // read_line will leave trailing newlines which must be removed
+        match result.feed_line(line.trim_right_matches(|c: char|{ c== '\n' || c == '\r'})) {
+            Ok("") => {}
+            Ok("221 Bye") => { break; }
+            Ok(s) => {
+                writeln!(stream, "{}", s)?;
+            },
+            Err(e) => {
+                writeln!(stream, "{}", e)?;
             }
         }
     }
 
-}
-
-fn result_ok() -> Result<&'static str, &'static str> {
-    Ok("250 OK")
-}
-
-fn result_empty() -> Result<&'static str, &'static str> {
-    Ok("")
-}
-
-fn result_send_message_content() -> Result<&'static str, &'static str> {
-    Ok("354 Send message content")
-}
-
-fn result_ready() -> Result<&'static str, &'static str> {
-    Ok("220 ready")
-}
-
-fn result_bye() -> Result<&'static str, &'static str> {
-    Ok("221 Bye")
-}
-
-fn result_syntax_error() -> Result<&'static str, &'static str> {
-    Err("500 unexpected line")
+    Ok(result)
 }
 
 
@@ -197,21 +210,20 @@ mod tests {
     #[test]
     fn parse_message() {
         // When
-        let mut parser = Parser::new();
+        let mut result = ConnectionResult::new();
 
-        // TODO: Read from file
-        parser.feed_line("HELO localhost");
-        parser.feed_line("MAIL FROM: tester@localhost");
-        parser.feed_line("RCPT TO: admin@localhost");
-        parser.feed_line("DATA");
-        parser.feed_line("It works!");
-        parser.feed_line(".");
-        parser.feed_line("QUIT");
+        result.feed_line("HELO localhost").unwrap();
+        result.feed_line("MAIL FROM: tester@localhost").unwrap();
+        result.feed_line("RCPT TO: admin@localhost").unwrap();
+        result.feed_line("DATA").unwrap();
+        result.feed_line("It works!").unwrap();
+        result.feed_line(".").unwrap();
+        result.feed_line("QUIT").unwrap();
 
         // Then
-        assert_eq!(parser.get_sender_domain(), Some("localhost"));
+        assert_eq!(result.get_sender_domain(), Some("localhost"));
 
-        let messages = parser.get_messages().unwrap();
+        let messages = result.get_messages().unwrap();
         assert_eq!(messages.len(), 1);
 
         let message = messages.first().unwrap();
