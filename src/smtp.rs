@@ -149,6 +149,9 @@ impl ConnectionResult {
                         recipients: self.next_recipients.clone(),
                         data: self.next_data.clone()
                     });
+                    self.next_sender = "".to_string();
+                    self.next_recipients = Vec::new();
+                    self.next_data = Vec::new();
                     self.state = State::MailOrQuit;
                     Ok(MSG_OK)
                 } else {
