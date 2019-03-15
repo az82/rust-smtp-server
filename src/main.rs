@@ -68,14 +68,5 @@ fn main() {
     let listener = TcpListener::bind(&bind_address)
         .unwrap_or_else(|e| panic!("Binding to {} failed: {}", &bind_address, e));
 
-    // Handle incoming connections in parallel with workers equal to the number of cores
-    let pool = ThreadPool::new(num_cpus::get());
-    for stream_result in listener.incoming() {
-        match stream_result {
-            Ok(stream) => pool.execute(|| {
-                handle_connection(stream);
-            }),
-            Err(e) => eprintln!("Unable to handle client connection: {}", e),
-        }
-    }
+    // TODO: Call handle_connection asynchronously for each incoming connection ////////////////////
 }
