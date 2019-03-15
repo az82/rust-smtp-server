@@ -1,57 +1,24 @@
-use std::io::prelude::*;
-use std::io::{BufReader, Error};
-use std::net::TcpStream;
+use std::io::{BufRead, Error, Write};
 
+// Client commands
 const HELO_START: &str = "HELO ";
 const MAIL_START: &str = "MAIL FROM:";
 const RCPT_START: &str = "RCPT TO:";
 const DATA_LINE: &str = "DATA";
 const QUIT_LINE: &str = "QUIT";
 
+// Server responses
 const MSG_READY: &str = "220 ready";
 const MSG_OK: &str = "250 OK";
 const MSG_SEND_MESSAGE_CONTENT: &str = "354 Send message content";
 const MSG_BYE: &str = "221 Bye";
 const MSG_SYNTAX_ERROR: &str = "500 unexpected line";
 
-//S: 220 smtp.server.com Simple Mail Transfer Service Ready
-//C: HELO client.example.com
-//S: 250 Hello client.example.com
-//C: MAIL FROM:<mail@samlogic.com>
-//S: 250 OK
-//C: RCPT TO:<john@mail.com>
-//S: 250 OK
-//C: DATA
-//S: 354 Send message content; end with <CRLF>.<CRLF>
-//C: <The message data (body text, subject, e-mail header, attachments etc) is sent>
-//C: .
-//S: 250 OK, message accepted for delivery: queued as 12345
-//C: QUIT
-//S: 221 Bye
-
-enum State {
-    Helo,
-    Mail,
-    Rcpt,
-    RcptOrData,
-    Dot,
-    MailOrQuit,
-    Done,
-}
-
+/// An Email message
 pub struct Message {
     sender: String,
     recipients: Vec<String>,
     data: Vec<String>,
-}
-
-pub struct ConnectionResult {
-    state: State,
-    sender_domain: String,
-    messages: Vec<Message>,
-    next_sender: String,
-    next_recipients: Vec<String>,
-    next_data: Vec<String>,
 }
 
 impl Message {
@@ -68,9 +35,32 @@ impl Message {
     }
 }
 
-impl ConnectionResult {
-    pub fn new() -> ConnectionResult {
-        ConnectionResult {
+/// SMTP States
+///
+/// States are named by the next expected command(s).
+enum State {
+    Helo,
+    Mail,
+    Rcpt,
+    RcptOrData,
+    Dot,
+    MailOrQuit,
+    Done,
+}
+
+/// The statea of a SMTP connection.
+pub struct Connection {
+    state: State,
+    sender_domain: String,
+    messages: Vec<Message>,
+    next_sender: String,
+    next_recipients: Vec<String>,
+    next_data: Vec<String>,
+}
+
+impl Connection {
+    pub fn new() -> Connection {
+        Connection {
             state: State::Helo,
             sender_domain: "".to_string(),
             messages: Vec::new(),
@@ -78,6 +68,33 @@ impl ConnectionResult {
             next_recipients: Vec::new(),
             next_data: Vec::new(),
         }
+    }
+
+    /// Handle an incoming connection
+    pub fn handle(reader: &mut BufRead, writer: &mut Write) -> Result<Connection, Error> {
+        let mut result = Connection::new();
+
+        writeln!(writer, "{}", MSG_READY)?;
+
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line)?;
+            // read_line will leave trailing newlines which must be removed
+            match result.feed_line(line.trim_right_matches(|c: char| c == '\n' || c == '\r')) {
+                Ok("") => {}
+                Ok(s) => {
+                    writeln!(writer, "{}", s)?;
+                    if s.starts_with("221") {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    writeln!(writer, "{}", e)?;
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     fn get_if_done<R, F: FnOnce() -> R>(&self, getter: F) -> Option<R> {
@@ -95,7 +112,7 @@ impl ConnectionResult {
         self.get_if_done(|| self.sender_domain.as_str())
     }
 
-    pub fn feed_line<'a>(&mut self, line: &'a str) -> Result<&'a str, &'a str> {
+    fn feed_line<'a>(&mut self, line: &'a str) -> Result<&'a str, &'a str> {
         match self.state {
             State::Helo => {
                 if line.starts_with(HELO_START) {
@@ -171,43 +188,14 @@ impl ConnectionResult {
     }
 }
 
-pub fn handle_connection(mut stream: TcpStream) -> Result<ConnectionResult, Error> {
-    let mut result = ConnectionResult::new();
-
-    writeln!(stream, "{}", MSG_READY)?;
-
-    let mut reader = BufReader::new(stream.try_clone()?);
-
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        // read_line will leave trailing newlines which must be removed
-        match result.feed_line(line.trim_right_matches(|c: char| c == '\n' || c == '\r')) {
-            Ok("") => {}
-            Ok("221 Bye") => {
-                break;
-            }
-            Ok(s) => {
-                writeln!(stream, "{}", s)?;
-            }
-            Err(e) => {
-                writeln!(stream, "{}", e)?;
-            }
-        }
-    }
-
-    Ok(result)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::BufReader;
 
     #[test]
     fn parse_message() {
         // When
-        let mut result = ConnectionResult::new();
-
         let request = "HELO localhost\n\
                        MAIL FROM: tester@localhost\n\
                        RCPT TO: admin@localhost\n\
@@ -215,14 +203,11 @@ mod tests {
                        It works!\n\
                        .\n\
                        QUIT\n";
-        let mut response = String::new();
+        let mut reader = BufReader::new(request.as_bytes());
 
-        for line in request.lines() {
-            match result.feed_line(&line) {
-                Ok(s) => response.push_str(s),
-                Err(s) => response.push_str(s),
-            }
-        }
+        let mut response_bytes = Vec::new();
+        let result = Connection::handle(&mut reader, &mut response_bytes).unwrap();
+        let response = String::from_utf8(response_bytes).unwrap();
 
         // Then
         assert_eq!(result.get_sender_domain(), Some("localhost"));
@@ -238,21 +223,13 @@ mod tests {
 
         assert_eq!(
             response,
-            "250 OK\
-             250 OK\
-             250 OK\
-             354 Send message content\
-             250 OK\
-             221 Bye"
+            "220 ready\n\
+             250 OK\n\
+             250 OK\n\
+             250 OK\n\
+             354 Send message content\n\
+             250 OK\n\
+             221 Bye\n"
         )
-    }
-
-    #[test]
-    fn no_helo() {
-        // Given
-        let mut result = ConnectionResult::new();
-
-        // Expect
-        assert_eq!(result.feed_line("Invalid SMTP"), Err(MSG_SYNTAX_ERROR));
     }
 }

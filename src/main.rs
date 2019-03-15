@@ -3,6 +3,7 @@ extern crate num_cpus;
 extern crate threadpool;
 
 use clap::{App, Arg};
+use std::io::BufReader;
 use std::net::{TcpListener, TcpStream};
 use threadpool::ThreadPool;
 
@@ -45,8 +46,10 @@ fn parse_args() -> String {
 
 /// Handle a client connection.
 /// If the SMTP communication was successful, print a list of messages on stdout.
-fn handle_connection(stream: TcpStream) {
-    match smtp::handle_connection(stream) {
+fn handle_connection(mut stream: TcpStream) {
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+
+    match smtp::Connection::handle(&mut reader, &mut stream) {
         Ok(result) => {
             println!("Sender domain: {}", result.get_sender_domain().unwrap());
             for message in result.get_messages().unwrap() {
