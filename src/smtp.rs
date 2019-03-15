@@ -48,7 +48,7 @@ enum State {
     Done,
 }
 
-/// The statea of a SMTP connection.
+/// The state of a SMTP connection.
 pub struct Connection {
     state: State,
     sender_domain: String,
