@@ -34,7 +34,6 @@ Bye.
 .
 QUIT
 EOT
-EOT
 ```
 
 ## About SMTP
