@@ -71,7 +71,7 @@ impl Connection {
     }
 
     /// Handle an incoming connection
-    pub fn handle(reader: &mut BufRead, writer: &mut Write) -> Result<Connection, Error> {
+    pub fn handle(reader: &mut dyn BufRead, writer: &mut dyn Write) -> Result<Connection, Error> {
         let mut result = Connection::new();
 
         writeln!(writer, "{}", MSG_READY)?;
@@ -80,7 +80,7 @@ impl Connection {
             let mut line = String::new();
             reader.read_line(&mut line)?;
             // read_line will leave trailing newlines which must be removed
-            match result.feed_line(line.trim_right_matches(|c: char| c == '\n' || c == '\r')) {
+            match result.feed_line(line.trim_end_matches(|c: char| c == '\n' || c == '\r')) {
                 Ok("") => {}
                 Ok(s) => {
                     writeln!(writer, "{}", s)?;
